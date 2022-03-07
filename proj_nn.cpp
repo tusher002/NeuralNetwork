@@ -8,8 +8,7 @@
  * 
  * driver program train 
  */
-#include<sys/time.h>
-#include<time.h>
+
 #include <iostream>
 #include <math.h> 
 #include <stdlib.h>
@@ -17,7 +16,7 @@
 #include <random>
 #include <chrono>
 #include <ctime>
-#include <xmmintrin.h>
+#include <emmintrin.h>  
 using namespace std;
 
 #define A  1.7159
@@ -63,7 +62,6 @@ int cnt_Z=0;
 void get_selected_labels(){
     for(int i=0,k=0;i<50000;i++){
         if(label[i]<4){
-            counts[label[i]] += 1;
             selected_labels_index[k]=i;
             k++;
         }
@@ -183,7 +181,8 @@ void training_label(){
         {
             unsigned char temp=0;
             file.read((char*)&temp,sizeof(temp));
-            label[i]= temp; 
+            label[i]= temp;
+            counts[temp] += 1;  
         }  
         //display_label_by_id(7000);
     }
@@ -201,32 +200,42 @@ double sigmoid(double x)
 void forward(double *input)
 {
 
-        for (int i = 0; i<N0; i++) 
-		IN[i] = input[i];
+        for (int i = 0; i<N0; i+=4)
+        {
+		    IN[i] = input[i];
+            IN[i+1] = input[i+1];
+            IN[i+2] = input[i+2];
+            IN[i+3] = input[i+3];
+        }
 
         // compute the weighted sum HS in the hidden layer
-        for (int i=0; i<N1; i++) {
-		HS[i] = B1[i];
+        for (int i=0; i<N1; i+=4)
+        {
+		    HS[i] = B1[i];
+            HS[i+1] = B1[i+1];
+            HS[i+2] = B1[i+2];
+            HS[i+3] = B1[i+3];
+	    }
+
         
-	}
-        for (int i=0; i<N1; i++) {
-		for (int j=0; j<N0; j++){
-			HS[i] += IN[j]*W0[j][i];
-            //cout<<W0[j][i]<<endl;
+        for (int j=0; j<N0; j++)
+        {
+            double inp = IN[j];
+		    for (int i=0; i<N1; i++)
+            {
+                HS[i] += inp*W0[j][i];
             }
-	}
+	    }
 
         // Comput the output of the hidden layer, HO[N1];
 
-        for (int i=0; i<N1; i++) {
-		HO[i] = sigmoid(HS[i]);
-        //cout<<HS[i]<<"   "<<HO[i]<<endl;
-	}
-
-
-
-
-
+        for (int i=0; i<N1; i++)
+        {
+		    HO[i] = sigmoid(HS[i]);
+            HO[i+1] = sigmoid(HS[i+1]);
+            HO[i+2] = sigmoid(HS[i+2]);
+            HO[i+3] = sigmoid(HS[i+3]);
+	    }
 
 
         // compute the weighted sum HS in the hidden layer
@@ -234,16 +243,20 @@ void forward(double *input)
 		HS2[i] = B2[i];
         
 	}
-        for (int i=0; i<N2; i++) {
-		for (int j=0; j<N1; j++){
-			HS2[i] += HO[j]*W1[j][i];
-            //cout<<W0[j][i]<<endl;
+
+        
+        for (int j=0; j<N1; j++)
+        {
+            double ho = HO[j];
+            for (int i=0; i<N2; i++)
+            {
+                HS2[i] += ho*W1[j][i];
             }
-	}
+	    }
 
         // Comput the output of the hidden layer, HO[N1];
 
-        for (int i=0; i<N1; i++) {
+        for (int i=0; i<N2; i++) {
 		HO2[i] = sigmoid(HS2[i]);
         //cout<<HS[i]<<"   "<<HO[i]<<endl;
 	}
@@ -342,8 +355,14 @@ double backward(double *O, double *Y)
 		dHO2_HS2[i] = A*B*(1- ((HO2[i]/A) * (HO2[i]/A)));
 
         // compute dE_HS = dE_HO dot dHO_HS
-        for (int i=0; i<N2; i++)
-		dE_HS2[i] = dE_HO2[i] * dHO2_HS2[i];
+        // for (int i=0; i<N2; i++)
+		// dE_HS2[i] = dE_HO2[i] * dHO2_HS2[i];
+        for (int i = 0; i < N2; i+=2)
+        {
+            _mm_storeu_pd(&dE_HS2[i], 
+            _mm_mul_pd(_mm_loadu_ps(&dE_HO2[i]), 
+            _mm_loadu_pd(&dHO2_HS2[i])));
+        }
 
         // compute dE_B1 = dE_HS
         for (int i=0; i<N2; i++)
@@ -366,8 +385,14 @@ double backward(double *O, double *Y)
 		dHO_HS[i] = A*B*(1- ((HO[i]/A) * (HO[i]/A)));
 
         // compute dE_HS = dE_HO dot dHO_HS
-        for (int i=0; i<N1; i++)
-		dE_HS[i] = dE_HO[i] * dHO_HS[i];
+        // for (int i=0; i<N1; i++)
+		// dE_HS[i] = dE_HO[i] * dHO_HS[i];
+        for (int i = 0; i < N1; i+=2)
+        {
+            _mm_storeu_pd(&dE_HS[i], 
+            _mm_mul_pd(_mm_loadu_pd(&dE_HO[i]), 
+            _mm_loadu_pd(&dHO_HS[i])));
+        }
 
         // compute dE_B1 = dE_HS
         for (int i=0; i<N1; i++)
@@ -377,13 +402,6 @@ double backward(double *O, double *Y)
         for (int i=0; i<N0; i++)
 		for (int j = 0; j<N1; j++) 
 			dE_W0[i][j] = dE_HS[j]*IN[i];
-
-
-
-
-
-
-
 
 
 
@@ -410,37 +428,15 @@ double backward(double *O, double *Y)
 		B3[i] = B3[i] - rate * dE_B3[i];
 
 }  
-double forward_time[100];
-double backward_time[100];
-double forward_time_avg;
-double backward_time_avg;
 
-void duration_f(struct timespec *b, struct timespec *c, int i)
-{
-	long long r = c->tv_nsec - b->tv_nsec;
-        r += ((long long)(c->tv_sec - b->tv_sec) ) * 1000000000;
-	forward_time[i] = r;
-}
-
-void duration_b(struct timespec *b, struct timespec *c, int i)
-{
-	long long r = c->tv_nsec - b->tv_nsec;
-        r += ((long long)(c->tv_sec - b->tv_sec) ) * 1000000000;
-	backward_time[i] = r;
-}
-
-
+	
 void train(int iter)
 {
 	for (int i = 0; i< iter; i++) {
 		//int ii = random () % 4;
 		int ii = i % 20679;
                 //int ii= 3;
-        struct timespec b, e;
-        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &b);
 		forward(&(selected_X_data[ii][0]));
-        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &e);  
-        duration_f(&b, &e, i);
 
         int max_ho_ind=-1;
         int flag=1;
@@ -462,10 +458,7 @@ void train(int iter)
         else
             predicted_label[ii] = -1;
 
-        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &b);
 		backward(OO, &(selected_Y_label[ii][0]));
-        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &e);  
-        duration_b(&b, &e, i);
 
 		if (i % 10000 == 0 && i!=0){
             cout << "Iter " << i << ": err =" << err << "\n"; 
@@ -498,14 +491,6 @@ int main(int argc, char *argv[])
     for(int i=0; i<N3; i++){
         counts[i] = 0;
     }
-
-    training_image();
-    training_label();
-
-    get_selected_labels();
-    get_selected_X_data();
-    get_selected_Y_label();
-
     MyFile.open("output_hudai.txt");
     for(int i=0; i<N3; i++)
     {   
@@ -515,61 +500,33 @@ int main(int argc, char *argv[])
 
     }
     MyFile.close();
-    
+    training_image();
+    training_label();
+
+    get_selected_labels();
+    get_selected_X_data();
+    get_selected_Y_label();
  
 	// randomize weights
-    random_device rd;  // Will be used to obtain a seed for the random number engine
-    mt19937 gen(rd()); // Standard mersenne_twister_engine seeded with rd()
-    uniform_real_distribution<> dis(-0.05, 0.05);
-    uniform_real_distribution<> dis_b(-0.05, 0.05);
-    for (int j = 0; j<N1; j++)        
-    {
-        for (int i = 0; i<N0; i++)
-        {
-            W0[i][j] = dis(gen);
-        }
-    }
-    for (int i = 0; i<N2; i++){
-        B2[i] = dis_b(gen);
-    }
-
-    for (int j = 0; j<N2; j++)        
-    {
-        for (int i = 0; i<N1; i++)
-        {
-            W1[i][j] = dis(gen);
-        }
-    }
-
-    for (int i = 0; i<N3; i++){
-        B3[i] = dis_b(gen);
-    }
-    
+    for (int i = 0; i<N1; i++)
+    B1[i] = random()*1.0/RAND_MAX/1000;
+    for (int i = 0; i<N0; i++)
+    for (int j = 0; j<N1; j++)
+        W0[i][j] = random()*1.0/RAND_MAX/1000;
+    for (int i = 0; i<N2; i++)
+    B2[i] = random()*1.0/RAND_MAX/1000000;
+    for (int i = 0; i<N1; i++)
+    for (int j = 0; j<N2; j++)
+        W1[i][j] = random()*1.0/RAND_MAX/1000;
+    for (int i = 0; i<N3; i++)
+    B3[i] = random()*1.0/RAND_MAX/1000000;
+    for (int i = 0; i<N2; i++)
     for (int j = 0; j<N3; j++)
-    {
-        for (int i = 0; i<N2; i++)
-        {
-            W2[i][j] = dis(gen);
-        }
-    }
+        W2[i][j] = random()*1.0/RAND_MAX/1000;
 			
     time_t my_time = time(NULL);
     cout<<"Training begins: "<<ctime(&my_time)<<endl;
 	if (argc == 2) train(atoi(argv[1]));
-        else train(100);
+        else train(100000000);
     
-    forward_time_avg = 0;
-    backward_time_avg = 0;
-
-    for(int i=0; i<100; i++)
-    {
-        forward_time_avg+= forward_time[i];
-        backward_time_avg+= backward_time[i];
-    }
-    
-    forward_time_avg /= 100;
-    backward_time_avg /= 100;
-    cout<<"Forward avg: "<<forward_time_avg<<endl;
-    cout<<"Backward avg: "<<backward_time_avg<<endl;
-    return 0;
 }
